@@ -133,3 +133,34 @@ event.registerTempTable("event")
 // Execute a Spark SQL
 context.sql("SELECT created_at, repo.name AS `repo.name`, actor.id, type FROM event WHERE type = 'PullRequestEvent'").limit(5).show()
 ```
+
+## With Machine Learning (word2vec)
+
+After extracting the input data from a DataFrame, we create a model of word2vec.
+Because an event can have multiple commit massages, we should split the commit messages.
+
+```
+import org.apache.spark.mllib.feature.Word2Vec
+import org.apache.spark.mllib.linalg.Vectors
+import org.apache.spark.mllib.linalg.Vector
+import org.apache.spark.rdd.RDD
+import org.apache.spark.SparkContext
+import org.apache.spark.SparkContext._
+import org.apache.spark.SparkFiles
+import scala.collection.mutable.ArrayBuffer
+
+val delimiter = "::::::::::"
+def joinstr(x: ArrayBuffer[String]): String = x.mkString(delimiter)
+val toIter = udf(joinstr _)
+// expand each event
+val messages = event.select($"payload.commits.message" as 'messages).filter("messages is not null").
+    select(toIter($"messages")).flatMap(row => row.toSeq.map(_.toString).apply(0).split(delimiter))
+// tokenize each commit message
+val message = messages.map(_.replaceAll("""(\n|)""", "").replaceAll("""\s+""", " ").split(" ").map(_.replaceAll("""(,|.)$""", "")).toSeq).filter(_.size > 0)
+
+// create a model
+val model = new Word2Vec().fit(message)
+model.findSynonyms("bug", 10).foreach(println)
+model.findSynonyms("issue", 10).foreach(println)
+model.findSynonyms("problem", 10).foreach(println)
+```
